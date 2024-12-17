@@ -1,4 +1,4 @@
-### My first "serious" project
+## My first "serious" project
 
 Made with the help of this tutorial https://viewsourcecode.org/snaptoken/kilo/
 
@@ -7,3 +7,4 @@ Made with the help of this tutorial https://viewsourcecode.org/snaptoken/kilo/
 - LSP
 - real-time calculator
 - themes
+
