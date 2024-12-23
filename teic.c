@@ -46,15 +46,17 @@ struct editorConfig
 {
 	int cx, cy; //cursor position x,y
 	int rx; //render index for tabs should be > cx if no tabs on the line
+    int rowoff; //row offset
+    int coloff; //collumn offset
+
     int screenrows;
     int screencols;
 
     int numrows;
 
-    int rowoff; //row offset
-    int coloff; //collumn offset
-
     erow *row;		
+
+	char *filename;
 
     struct termios orig_termios;
 };
@@ -208,7 +210,7 @@ int readKey(void)
 
 int cursorPos(int *rows, int *cols)
 {
-	char buf[32];
+	char buf[80];
     unsigned int i = 0;
 
     if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4)//scriviamo al terminale cosa vogliamo in out
@@ -260,6 +262,23 @@ int getWindowSize(int *rows, int *cols)//la uso come base per dire alle altre fu
 }
 
 /*** Row Operations ***/
+
+int editorRowCxToRx(erow *row, int cx) //char index to render index
+{
+    int rx = 0;
+    int j;
+
+    for (j = 0; j < cx; j++) 
+    {
+        if (row->chars[j] == '\t')
+          rx += (TEIC_TAB - 1) - (rx % TEIC_TAB);
+
+        rx++;
+    }
+    
+    return rx;
+}
+
 
 void editorUpdateRow(erow *row) 
 {
@@ -317,7 +336,10 @@ void editorAppendRow(char *s, size_t len)//alloco spazio per erow e copio la str
 
 void editorOpen(char *filename)
 {
-	FILE *fp = fopen(filename , "r");//perchè cos' abbiamo l'indirizzo del file dentro fp
+	free(E.filename);
+	E.filename = strdup(filename);
+	
+	FILE *fp = fopen(filename , "r");//perchè così' abbiamo l'indirizzo del file dentro fp
 	if(!fp) error("fopen");
 	
 	char *line = NULL;
@@ -376,12 +398,14 @@ void freeBuf(struct tBuf *freeBuff)
 
 void editorScroll()
 {
-	//vertical scroll
-	if(E.cy < E.rowoff) 
-	{	
-		E.rowoff = E.cy;
-	}
-	
+	  E.rx = 0;
+
+  	//vertical scroll
+    if (E.cy < E.numrows) 
+    {
+        E.rx = editorRowCxToRx(&E.row[E.cy], E.cx);
+    }
+     
 	if(E.cy >= E.rowoff + E.screenrows) 
 	{
 		E.rowoff = E.cy - E.screenrows + 1;
@@ -455,13 +479,49 @@ void genTilde(struct tBuf *tildeBuff) //generiamo le tilde da disegnare dopo
 			makeBuf(tildeBuff, "\x1b[K",3);
 			//K lo usiamo per pulire lo schermo una riga alla volta	
 			
-  	    	if(y < E.screenrows - 1)
-    	  	{
-    	  		makeBuf(tildeBuff, "\r\n", 2);
-    	  	}
+    	  	makeBuf(tildeBuff, "\r\n", 2);
     	}
 }
 
+void editorDrawStatusBar(struct tBuf *buff) 
+{
+    makeBuf(buff, "\x1b[7m", 4);
+	//char status[80];
+	char rstatus[80];
+
+	int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cy + 1, E.numrows);
+
+	makeBuf(buff, rstatus, rlen);
+
+    makeBuf(buff, "\x1b[m", 3);
+
+   // int len = snprintf(status, sizeof(status), "%.20s - %d lines",
+    			      // E.filename ? E.filename : "[No Name]", E.numrows); //errore qui
+
+	
+    // if(len > E.screencols)
+	// {
+		// len = E.screencols;
+	// }
+	
+  //makeBuf(buff, status, len);
+ 
+    // while (len < E.screencols)
+    // {
+    	// if(E.screencols - len == rlen)
+    	// {
+			// break;
+    	// }
+    	// else
+    	// {
+    		// makeBuf(buff, " ", 1);
+    		// len++;
+    	// }
+ 
+        // makeBuf(buff, " ", 1);
+        // len++;
+    // }
+}
 
 void renderUI()
 {
@@ -473,10 +533,10 @@ void renderUI()
 	//makeBuf(&buff, "\x1b[2J",4);
 	makeBuf(&buff, "\x1b[H",3);
 
-	
 	genTilde(&buff);
+	editorDrawStatusBar(&buff);
 
-	char buf[32];
+	char buf[80];
 	snprintf(buf, sizeof(buf), "\x1b[%d;%dH",(E.cy - E.rowoff) + 1,
 											 (E.cx - E.coloff) + 1);//passiamo a %H c.xe c.y
 	makeBuf(&buff, buf, strlen(buf));
@@ -575,13 +635,24 @@ void keypress()
 
 
 		case END_KEY:
-			E.cx = E.screencols - 1;
+			if(E.cy < E.numrows)
+				E.cx = E.row[E.cy].size - 1;
 			break;
 		
 		case PAGE_UP:
 		case PAGE_DOWN:
 			{
-				int times = E.screenrows;
+				if (cPressed == PAGE_UP) {
+					E.cy = E.rowoff;
+        		} 
+        		else if (cPressed == PAGE_DOWN) 
+        		{
+        			  E.cy = E.rowoff + E.screenrows - 1;
+        			  if (E.cy > E.numrows) E.cy = E.numrows;
+        		}
+
+        		int times = E.screenrows;
+
 				while(times--)
 				{
 					moveCursor(cPressed == PAGE_UP ? ARROW_UP : ARROW_DOWN);
@@ -614,8 +685,11 @@ void initEditor()
 	E.rowoff = 0;//è 0 perchè di default siamo in cima al file
 	E.coloff = 0;//è 0 perchè di default siamo a sinistra del file
 
-    if (getWindowSize(&E.screenrows, &E.screencols) == -1)
-   	   error("getWindowSize");
+	E.filename = NULL;
+
+    if (getWindowSize(&E.screenrows, &E.screencols) == -1) error("getWindowSize");
+
+	E.screenrows -= 1;
 }
 
 
