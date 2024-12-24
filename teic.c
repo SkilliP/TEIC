@@ -9,6 +9,8 @@
 #include <string.h> 
 #include <sys/ioctl.h>
 #include <sys/types.h> 
+#include <time.h>
+#include <stdarg.h>
 
 /*** inludes end ***/
 
@@ -57,6 +59,9 @@ struct editorConfig
     erow *row;		
 
 	char *filename;
+
+	char statusmsg[80];
+	time_t statusmsg_time;
 
     struct termios orig_termios;
 };
@@ -494,6 +499,7 @@ void editorDrawStatusBar(struct tBuf *buff)
 	makeBuf(buff, rstatus, rlen);
 
     makeBuf(buff, "\x1b[m", 3);
+    makeBuf(buff, "\r\n", 2);
 
    // int len = snprintf(status, sizeof(status), "%.20s - %d lines",
     			      // E.filename ? E.filename : "[No Name]", E.numrows); //errore qui
@@ -523,6 +529,18 @@ void editorDrawStatusBar(struct tBuf *buff)
     // }
 }
 
+void editorDrawMessageBar(struct tBuf *buff) 
+{
+    makeBuf(buff, "\x1b[K", 3);
+
+    int msglen = strlen(E.statusmsg);
+
+    if (msglen > E.scringeencols) msglen = E.screencols;
+
+    if (msglen && time(NULL) - E.statusmsg_time < 5)
+      makeBuf(buff, E.statusmsg, msglen);
+}
+
 void renderUI()
 {
 	editorScroll();
@@ -535,6 +553,7 @@ void renderUI()
 
 	genTilde(&buff);
 	editorDrawStatusBar(&buff);
+	editorDrawMessageBar(&buff);
 
 	char buf[80];
 	snprintf(buf, sizeof(buf), "\x1b[%d;%dH",(E.cy - E.rowoff) + 1,
@@ -552,6 +571,18 @@ void renderUI()
 
 	freeBuf(&buff);
 }
+
+void editorSetStatusMessage(const char *fmt, ...)//funzione variadica, può prendere n parametri in input
+{
+	va_list ap;
+
+	va_start(ap, fmt);//ftm = ultimo argomento prima di ... 
+		vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
+	va_end(ap);
+
+	E.statusmsg_time = time(NULL);
+}
+
 
 /***UI end***/
 
@@ -687,9 +718,12 @@ void initEditor()
 
 	E.filename = NULL;
 
+	E.statusmsg[0] = '\0';
+	E.statusmsg_time = 0;
+
     if (getWindowSize(&E.screenrows, &E.screencols) == -1) error("getWindowSize");
 
-	E.screenrows -= 1;
+	E.screenrows -= 2;
 }
 
 
@@ -702,7 +736,9 @@ int main(int argc, char *argv[])
 	{
 		editorOpen(argv[1]);//primo byte del file che fa seguire anche gli altri
 	}
-	
+
+	editorSetStatusMessage("HELP: Ctrl-Q = quit");
+		
 	while (1) 
 	{
 		renderUI();
